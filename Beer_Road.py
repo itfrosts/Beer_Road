@@ -61,6 +61,7 @@ def DFS_generator(data, start, end, path, dist_travelled, dist_limit):
     
     Returns: yields possible path result - type: tuple(list)
     """
+    from_stack = Stack()
     from_stack.put((data, start, end, path, dist_travelled, dist_limit))
 
     while not from_stack.empty():
@@ -69,7 +70,7 @@ def DFS_generator(data, start, end, path, dist_travelled, dist_limit):
         if (dist_travelled > dist_limit):
             continue
 
-        if current == home and dist_travelled > 1000.0:
+        if current == home and dist_travelled > dist_limit/2:
             # route done - yield result
             yield tuple(path + [current])
         
@@ -83,13 +84,29 @@ def DFS_generator(data, start, end, path, dist_travelled, dist_limit):
 
             # checking if I can return home from neighbor, if not, time to go home
             if (from_home_to_nbr + direct_nbr_to_home) > dist_limit:
-                if want_home_now < 2000.0:
+                if want_home_now < dist_limit:
                     neighbor = data[0]
                     dist_travelled = want_home_now
                 else:
                     continue
                 
             from_stack.put((data, neighbor.ID, end, path + [current], from_home_to_nbr, dist_limit))
+
+def number_of_paths(data, n):
+    """
+    """
+    dist_limit = 2000
+    dfs_path_set = set()
+
+    gen = DFS_generator(data, data[0].ID, data[0].ID, [], 0, dist_limit)
+
+    # choosing how many possible paths to consider and catching IterationError if there are less possible paths
+    while len(dfs_path_set) < n:
+        try:
+            dfs_path_set.add(next(gen))
+        except StopIteration: 
+            break
+    return dfs_path_set
 
 def uniquebeers(beer_data, path_sets):
     """
@@ -113,79 +130,71 @@ def uniquebeers(beer_data, path_sets):
         if len(beerlist) > len(bestbeers):
             bestbeers = beerlist
             besttrip = trip
-
     return (besttrip, sorted(bestbeers))
 
-#importing and cleaning data
-beer_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/beers.csv').drop_duplicates()
-brewery_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/breweries.csv', index_col = 'id')
-geo_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/geocodes.csv', index_col = 'brewery_id')
+def print_answer(data, trip, beerlist):
+    """
+    Prints the answer in the required format.
+    
+    """
+    cntr1 = 0
+    num1 = 0
+    total_distance = 0
+    dist_between_stops = 0
+    print(f'You have {len(trip)-2} breweries on your itinerary:')
+    for stop in trip:
+        if num1 > 0:
+           dist_between_stops = int(calcDist(data, trip[num1-1], trip[num1]))
+           total_distance += int(calcDist(data, trip[num1-1], trip[num1]))
+        if stop == 0:
+            if cntr1 == 0:
+                print(f'[HOME] >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}')
+                cntr1 += 1    
+            else:
+                print(f'[HOME] >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}, distance: {dist_between_stops}km')
+                print(f'\nTotal distance of the journey is {total_distance}km')
+        else: 
+            print(f'[{stop}] {data[stop].name} >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}, distance: {dist_between_stops}km')
+        num1+=1
+    print(f'\n\nCollected {len(beerlist)} beer types:')
+    print("\n".join(str(beer) for beer in beerlist))
 
-brewery_df = brewery_df[~brewery_df.index.duplicated(keep='first')]
-geo_df = geo_df[~geo_df.index.duplicated(keep='first')]
+def main(home_lat, home_long):
+    """
+    """
+    #importing and cleaning data
+    beer_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/beers.csv').drop_duplicates()
+    brewery_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/breweries.csv', index_col = 'id')
+    geo_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/geocodes.csv', index_col = 'brewery_id')
 
-#taking care of the input at command line
-parser = argparse.ArgumentParser()
-parser.add_argument("lat", type=float, help="latitude coordinate")
-parser.add_argument("long", type=float, help="longitude coordinate")
-args = parser.parse_args()
- 
-assert (args.lat > -90 and args.lat < 90) and (args.long > -180 or args.long < 180), "Coordinates are invalid"
+    brewery_df = brewery_df[~brewery_df.index.duplicated(keep='first')]
+    geo_df = geo_df[~geo_df.index.duplicated(keep='first')]
+    
+    #creating a namedtuple for better performance
+    Location = namedtuple("Location", "ID name latitude longitude".split())
+    data = {}
+    for idx, row in brewery_df.iterrows():
+        name = row['name']
+        if idx in geo_df.index.values:
+            latitude = geo_df.at[idx, 'latitude']
+            longitude = geo_df.at[idx, 'longitude']
+        data[idx] = Location(idx, name, latitude, longitude)
 
+    #adding home location to the list
+    data[0] = Location(0, "Home", home_lat, home_long) 
+    
+    dfs_path_set = number_of_paths(data, 50)
+    
+    trip, beerlist = uniquebeers(beer_df, dfs_path_set)
+        
+    print_answer(data, trip, beerlist)
 
-#creating a namedtuple for better performance
-Location = namedtuple("Location", "ID name latitude longitude".split())
-data = {}
-for idx, row in brewery_df.iterrows():
-    name = row['name']
-    if idx in geo_df.index.values:
-        latitude = geo_df.at[idx, 'latitude']
-        longitude = geo_df.at[idx, 'longitude']
-    data[idx] = Location(idx, name, latitude, longitude)
-#adding home location to the list
-data[0] = Location(0, "Home", args.lat, args.long) 
-dist_limit = 2000
+if __name__ == "__main__":
+    #taking care of the input at command line
+    parser = argparse.ArgumentParser()
+    parser.add_argument("lat", type=float, help="latitude coordinate")
+    parser.add_argument("long", type=float, help="longitude coordinate")
+    args = parser.parse_args()
+    assert (args.lat > -90 and args.lat < 90) and (args.long > -180 or args.long < 180), "Coordinates are invalid"
 
-from_stack = Stack()
-dfs_path_set = set()
-
-gen = DFS_generator(data, data[0].ID, data[0].ID, [], 0, dist_limit)
-
-# choosing how many possible paths to consider and catching IterationError if there are less possible paths
-while len(dfs_path_set) < 50:
-    try:
-        dfs_path_set.add(next(gen))
-    except StopIteration: 
-        break
-
-trip, beerlist = uniquebeers(beer_df, dfs_path_set)
-
-final_distance = 0
-for i in range(len(trip)):
-    if not trip[i+1]:
-        break
-    final_distance += calcDist(data, trip[i], trip[i+1])
-
-cntr1 = 0
-num1 = 0
-total_distance = 0
-dist_between_stops = 0
-
-print(f'You have {len(trip)-2} breweries on your itinerary:')
-for stop in trip:
-    if num1 > 0:
-        dist_between_stops = int(calcDist(data, trip[num1-1], trip[num1]))
-        total_distance += int(calcDist(data, trip[num1-1], trip[num1]))
-    if stop == 0:
-        if cntr1 == 0:
-            print(f'[HOME] >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}')
-            cntr1 += 1    
-        else:
-            print(f'[HOME] >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}, distance: {dist_between_stops}km')
-            print(f'\nTotal distance of the journey is {total_distance}km')
-    else: 
-        print(f'[{stop}] {data[stop].name} >> latitude: {data[stop].latitude}, longitude: {data[stop].longitude}, distance: {dist_between_stops}km')
-    num1+=1
-
-print(f'\n\nCollected {len(beerlist)} beer types:')
-print("\n".join(str(beer) for beer in beerlist))
+    main(args.lat, args.long)
