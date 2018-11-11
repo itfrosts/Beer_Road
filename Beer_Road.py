@@ -8,9 +8,11 @@ Program takes two command line arguments: latitude, longitude
 Data obtained from: github.com/brewdega/open-beer-database-dumps
 """
 
-import geopy.distance, sys, argparse
-from collections import namedtuple
+import argparse
 import pandas as pd
+from collections import namedtuple
+from math import sin, cos, sqrt, asin, radians
+from typing import Dict, Tuple, List, Iterator, Set
 
 class Stack():
 
@@ -26,40 +28,50 @@ class Stack():
     def empty(self):
         return len(self.stack) == 0
 
-def calcDist(data, start, end):
+def calcDist(data: Dict[int, Tuple], start: int, end: int) -> int:
     """
-    Takes two location IDs and returns the distance between them.
-    Args: start, end - location IDs for breweriers - type: int
-          data - dataset to look at - type: dict of named tuples
-    
-    Returns: distance in km - type: float
-    """
-    coords_1 = (data[start].latitude, data[start].longitude)
-    coords_2 = (data[end].latitude, data[end].longitude)
-    distance = (geopy.distance.great_circle(coords_1, coords_2).km)
-    return distance
+    Returns the distance in km between two locations using Harversine formula.
 
-def getneighbors(data, startlocation, n = 20):
+    Args: 
+        data: dataset with location IDs, latitude and longitude coordinates.
+        start: ID number of the location at starting point.
+        end: ID  number of the location at the end point.  end - location IDs for breweriers - type: int
     """
-    Finds the nearest neighbors.
-    Args: data - beer dataset - type: dict of namedtuples
-          startlocation - ID of current node - type: int
-          n - number of potential neighbors - type: int
+    lat1, lon1, lat2, lon2 = map(radians, [data[start].latitude, data[start].longitude, data[end].latitude, data[end].longitude])
 
-    Returns: neighbors - subset of data containing n closest neighbors - type: dict of namedtuples
+    dif_lat = lat2 - lat1
+    dif_lon = lon2 - lon1
+
+    a = sin(dif_lat/2)**2 + cos(lat1) * cos(lat2) * sin(dif_lon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371 # Radius of Earth in km
+    return int(c * r)
+
+def getneighbors(data: Dict[int, Tuple], startlocation: int, n=20) -> Dict[int, Tuple]:
+    """
+    Returns n nearest neighbors of a given location.
+
+    Args: 
+        data: dataset containing location IDs, latitude and longitude coordinates.
+        startlocation: ID of the current location.
+        n: number of neighbors to return.
     """
     return sorted(data.values(), key=lambda x: calcDist(data, startlocation, int(x.ID)))[1:n+1]
 
-def DFS_generator(data, start, end, path, dist_travelled, dist_limit):
+def DFS_generator(data: Dict[int, Tuple], start: int, end: int, path: List[int], dist_travelled: int, dist_limit: int) -> Iterator[List[int]]:
     """
-    Possible path generator using Depth First Search algorithm. Starts looking near distance limit first.
-    Args: data - beer dataset - type: dict of namedtuples
-          start, end - locations IDs - type: ints
-          path - traversed path - type: list
-          dist_travelled - type: float
-          dist_limit - type: float 
+    Generates a possible path using depth first search algorithm.
     
-    Returns: yields possible path result - type: tuple(list)
+    Args: 
+        data: dataset containing location IDs, latitude and longitude coordinates.
+        start: ID of the starting location.
+        end: ID of the final location.
+        path: list of traversed nodes.
+        dist_travelled: sum of travelled distance.
+        dist_limit: limit of total distance.
+    
+    Yields: 
+        A list of all the visited nodes from start to end.
     """
     from_stack = Stack()
     from_stack.put((data, start, end, path, dist_travelled, dist_limit))
@@ -92,15 +104,19 @@ def DFS_generator(data, start, end, path, dist_travelled, dist_limit):
                 
             from_stack.put((data, neighbor.ID, end, path + [current], from_home_to_nbr, dist_limit))
 
-def number_of_paths(data, n):
+def number_of_paths(data: Dict[int, Tuple], n: int) -> Set[int]:
     """
+    Returns a set of n possible paths generated using DFS_generator. 
+
+    Args:
+        data: dataset containing location IDs, latitude and longitude coordinates.
+        n: number of possible paths. 
     """
     dist_limit = 2000
     dfs_path_set = set()
 
     gen = DFS_generator(data, data[0].ID, data[0].ID, [], 0, dist_limit)
 
-    # choosing how many possible paths to consider and catching IterationError if there are less possible paths
     while len(dfs_path_set) < n:
         try:
             dfs_path_set.add(next(gen))
@@ -108,15 +124,17 @@ def number_of_paths(data, n):
             break
     return dfs_path_set
 
-def uniquebeers(beer_data, path_sets):
+def uniquebeers(beer_data: pd.DataFrame, path_sets: Set[int]) -> Tuple[List, List]:
     """
     Checks for unique beers in possible route.
-    Args: beer_data - contains beer names - type: pandas.DataFrame
-          path_sets - possible route - type: tuple(list)
 
-    Returns a tuple of:
-        besttrip - best path out of possible routs - type: list
-        bestbeers - sorted list of all unique beer names along the path - type: list
+    Args: 
+        beer_data: pandas.DataFrame containing beer names associated with brewery IDs.
+        path_sets: a set of n possible paths.
+
+    Returns:
+        besttrip: best path from the considered n routes. 
+        bestbeers: sorted list of unique beers collected along the path.
     """
     bestbeers = []
     besttrip = []
@@ -132,10 +150,14 @@ def uniquebeers(beer_data, path_sets):
             besttrip = trip
     return (besttrip, sorted(bestbeers))
 
-def print_answer(data, trip, beerlist):
+def print_answer(data: Dict[int, Tuple], trip: List[int], beerlist: List[str]) -> None:
     """
     Prints the answer in the required format.
-    
+
+    Args:
+        data: dataset containing location IDs, latitude and longitude coordinates.
+        trip: list of node IDs visited along the path.
+        beerlist: list of unique beers collected along the path.
     """
     cntr1 = 0
     num1 = 0
@@ -159,8 +181,13 @@ def print_answer(data, trip, beerlist):
     print(f'\n\nCollected {len(beerlist)} beer types:')
     print("\n".join(str(beer) for beer in beerlist))
 
-def main(home_lat, home_long):
+def main(home_lat: int, home_long: int) -> None:
     """
+    Arranges previously defined functions, solves the question and outputs the result.
+
+    Args:
+        home_lat: latitude coordinate input from command line.
+        home_long: longitude coordinate input from command line.
     """
     #importing and cleaning data
     beer_df = pd.read_csv('https://raw.githubusercontent.com/brewdega/open-beer-database-dumps/master/dumps/beers.csv').drop_duplicates()
